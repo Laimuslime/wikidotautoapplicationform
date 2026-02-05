@@ -14,7 +14,7 @@ def load_keywords(path="keywords.json"):
         with open(path, encoding="utf-8") as f:
             return json.load(f)["keywords"]
     except Exception:
-        return ["你好"]
+        return ["test"]
 
 
 def process_applications(driver, wait, keywords):
@@ -27,23 +27,42 @@ def process_applications(driver, wait, keywords):
             user_links = app.find_elements(By.CSS_SELECTOR, 'span.printuser a')
             user = user_links[-1].text.strip() if user_links else ""
             print(f"申请{idx} 用户:{user} 正文:{text}")
-            if any(k.lower() in text.lower() for k in keywords):
+            matched = any(k.lower() in text.lower() for k in keywords)
+            if matched:
                 btn = table.find_element(By.XPATH, './/a[contains(@onclick, "accept") and contains(@class, "btn-primary")]')
-                driver.execute_script("arguments[0].click();", btn)
-                time.sleep(1)
-                try:
-                    confirm = wait.until(EC.element_to_be_clickable((By.XPATH, '//input[@value="发送决定"]')))
-                    driver.execute_script("arguments[0].click();", confirm)
-                    time.sleep(2)
-                except Exception:
-                    pass
-                count += 1
                 print("已批准")
             else:
-                print("不匹配，跳过")
+                btn = table.find_element(By.XPATH, './/a[contains(@onclick, "decline") and contains(@class, "btn-danger")]')
+                print("已拒绝")
+            driver.execute_script("arguments[0].click();", btn)
+            time.sleep(1)
+            try:
+                confirm = wait.until(EC.element_to_be_clickable((By.XPATH, '//input[@value="发送决定"]')))
+                driver.execute_script("arguments[0].click();", confirm)
+                time.sleep(2)
+            except Exception:
+                pass
+            count += 1
         except Exception as e:
             print(f"处理出错: {e}")
     return count
+
+
+def load_config(path="config.json"):
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def wait_and_click(driver, wait, by, value, timeout=10):
+    el = wait.until(EC.element_to_be_clickable((by, value)), timeout)
+    driver.execute_script("arguments[0].click();", el)
+    return el
+
+
+def wait_and_send_keys(driver, wait, by, value, keys, timeout=10):
+    el = wait.until(EC.element_to_be_clickable((by, value)), timeout)
+    el.send_keys(keys)
+    return el
 
 
 def login_and_monitor(username, password, url, keywords, interval=60):
@@ -52,49 +71,34 @@ def login_and_monitor(username, password, url, keywords, interval=60):
     try:
         driver.get(url)
         wait = WebDriverWait(driver, 10)
-        time.sleep(2)
         orig = driver.current_window_handle
-        login_link = wait.until(EC.element_to_be_clickable((By.LINK_TEXT, "登入")))
-        login_link.click()
-        time.sleep(2)
+        wait_and_click(driver, wait, By.LINK_TEXT, "登入")
         if len(driver.window_handles) > 1:
             for h in driver.window_handles:
                 if h != orig:
                     driver.switch_to.window(h)
                     break
-        time.sleep(1)
-        wait.until(EC.element_to_be_clickable((By.NAME, "login"))).send_keys(username)
-        wait.until(EC.element_to_be_clickable((By.NAME, "password"))).send_keys(password)
-        btn = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), '登入')] | //input[@type='submit' and @value='登入']")))
-        driver.execute_script("arguments[0].click();", btn)
-        time.sleep(3)
+        wait_and_send_keys(driver, wait, By.NAME, "login", username)
+        wait_and_send_keys(driver, wait, By.NAME, "password", password)
+        wait_and_click(driver, wait, By.XPATH, "//button[contains(text(), '登入')] | //input[@type='submit' and @value='登入']")
         driver.switch_to.window(orig)
-        time.sleep(2)
         try:
-            wait.until(EC.presence_of_element_located((By.XPATH, "//*[contains(text(), '仪表板')]")))
+            wait.until(EC.presence_of_element_located((By.XPATH, "//*[contains(text(), '仪表板')]")), 10)
         except Exception:
             pass
-        member_btn = wait.until(EC.element_to_be_clickable((By.ID, "first-members")))
-        driver.execute_script("arguments[0].click();", member_btn)
-        time.sleep(2)
-        app_btn = wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="second-members"]/ul[2]/li[3]/a')))
-        driver.execute_script("arguments[0].click();", app_btn)
-        time.sleep(2)
-        print(f"监控申请书，每{interval}秒检查一次，关键词: {', '.join(keywords)}")
         round_num = 1
         while True:
             print(f"第{round_num}轮检查")
-            time.sleep(2)
             if not ensure_application_page(driver, wait):
                 print("未能进入申请书页面")
                 break
             n = process_applications(driver, wait, keywords)
-            if n:
-                print(f"本轮批准{n}个申请")
-            else:
-                print("本轮无匹配申请")
+            print(f"本轮处理{n}个申请")
+            print("刷新页面并重新进入申请书")
+            driver.refresh()
+            ensure_application_page(driver, wait)
             print(f"等待{interval}秒\n")
-            time.sleep(interval)
+            WebDriverWait(driver, interval).until(lambda d: False, "等待间隔结束")
             round_num += 1
     except KeyboardInterrupt:
         print("用户中断，退出")
@@ -134,9 +138,13 @@ def ensure_application_page(driver, wait):
 
 
 if __name__ == "__main__":
-    USERNAME = "IF_bot"
-    PASSWORD = ""
-    TARGET_URL = "https://if-backrooms.wikidot.com/_admin"
-    KEYWORDS = load_keywords("keywords.json")
-    CHECK_INTERVAL = 60
-    login_and_monitor(USERNAME, PASSWORD, TARGET_URL, KEYWORDS, CHECK_INTERVAL)
+    config = load_config("config.json")
+    login_and_monitor(
+        config["username"],
+        config["password"],
+        config["url"],
+        config["keywords"],
+        config.get("interval", 60)
+    )
+
+
