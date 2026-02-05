@@ -98,7 +98,8 @@ def login_and_monitor(username, password, url, keywords, interval=60):
             driver.refresh()
             ensure_application_page(driver, wait)
             print(f"等待{interval}秒\n")
-            WebDriverWait(driver, interval).until(lambda d: False, "等待间隔结束")
+            end_time = time.time() + interval
+            WebDriverWait(driver, interval).until(lambda d: time.time() >= end_time)
             round_num += 1
     except KeyboardInterrupt:
         print("用户中断，退出")
@@ -146,5 +147,3 @@ if __name__ == "__main__":
         config["keywords"],
         config.get("interval", 60)
     )
-
-
